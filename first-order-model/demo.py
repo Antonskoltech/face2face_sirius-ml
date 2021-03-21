@@ -155,11 +155,11 @@ if __name__ == "__main__":
         predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
     imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
 
-    def save_im(oath, im, jpg_quality=95):
+    def save_im(path, im, jpg_quality=95):
         ext = os.path.splitext(path)[1][1:]
         if ext.lower() in ['jpg', 'jpeg']:
             imageio.imwrite(path, im, quality=jpg_quality)
         else:
             imageio.imwrite(path, im)
-    save_im('segmentation/image_cropped.jpeg', source_image)
+    save_im('cropped_folder/image_cropped.jpeg', source_image)
 
