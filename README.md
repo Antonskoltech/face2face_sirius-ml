@@ -20,7 +20,7 @@ Result:
 ![](./videos/motion-cosegmentation.gif)
 
 - [x] Few-Shot Adversarial Learning of Realistic Neural Talking Head Models: 
-1. [paper](https://arxiv.org/pdf/1905.08233.pdf)\
+1. [paper](https://arxiv.org/pdf/1905.08233.pdf)
 2. [github](https://github.com/vincent-thevenin/Realistic-Neural-Talking-Head-Models)
 
 Result:
