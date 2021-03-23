@@ -66,6 +66,12 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
         kp_driving_initial = kp_detector(driving[:, :, 0])
 
         distance = lambda y: lambda x: np.sum(np.sum((x - y) ** 2, axis=1) ** 0.5)
+        
+        kp_frame_value = kp_driving_initial['value'][0].detach().cpu().numpy()
+        i_prev = np.argmin(list(map(distance(kp_frame_value), kp_source_value)))
+        kp_source_prev, source_prev = kp_source[i_prev], source[i_prev]
+        
+        alpha = 0.1
 
         for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
@@ -73,11 +79,22 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
                 driving_frame = driving_frame.cuda()
             kp_driving = kp_detector(driving_frame)
             kp_frame_value = kp_driving['value'][0].detach().cpu().numpy()
+            
             i = np.argmin(list(map(distance(kp_frame_value), kp_source_value)))
-            kp_norm = normalize_kp(kp_source=kp_source[i], kp_driving=kp_driving,
+            if i != i_prev:
+                kp_source_prev['value'] = (kp_source_prev['value'] + kp_source[i]['value']) / 2
+                kp_source_prev['jacobian'] = (kp_source_prev['jacobian'] + kp_source[i]['jacobian']) / 2
+                source_prev = (source_prev + source[i]) / 2
+                i_prev = i
+            else:
+                kp_source_prev['value'] = alpha * kp_source_prev['value'] + (1 - alpha) * kp_source[i]['value']
+                kp_source_prev['jacobian'] =  alpha * kp_source_prev['jacobian'] + (1 - alpha) * kp_source[i]['jacobian']
+                source_prev =  alpha * source_prev + (1 - alpha) * source[i]
+            
+            kp_norm = normalize_kp(kp_source=kp_source_prev, kp_driving=kp_driving,
                                    kp_driving_initial=kp_driving_initial, use_relative_movement=relative,
                                    use_relative_jacobian=relative, adapt_movement_scale=adapt_movement_scale)
-            out = generator(source[i], kp_source=kp_source[i], kp_driving=kp_norm)
+            out = generator(source_prev, kp_source=kp_source_prev, kp_driving=kp_norm)
 
             predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
     return predictions
