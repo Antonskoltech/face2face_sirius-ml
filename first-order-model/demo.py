@@ -16,6 +16,8 @@ from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
 from scipy.spatial import ConvexHull
+import cv2
+import time
 
 
 if sys.version_info[0] < 3:
@@ -50,7 +52,7 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
     generator.eval()
     kp_detector.eval()
-    
+    sr = cv2.dnn_superres.DnnSuperResImpl_create()
     return generator, kp_detector
 
 
@@ -101,6 +103,13 @@ def find_best_frame(source, driving, cpu=False):
             norm = new_norm
             frame_num = i
     return frame_num
+
+def super_resolution(source_image, modelScale):
+    sr = cv2.dnn_superres.DnnSuperResImpl_create()
+    sr.readModel('ESPCN_x4.pb')
+    sr.setModel('espcn', modelScale)
+    upscaled = sr.upsample(source_image)
+    return upscaled
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -153,13 +162,10 @@ if __name__ == "__main__":
         predictions = predictions_backward[::-1] + predictions_forward[1:]
     else:
         predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
-    imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
 
-    def save_im(path, im, jpg_quality=95):
-        ext = os.path.splitext(path)[1][1:]
-        if ext.lower() in ['jpg', 'jpeg']:
-            imageio.imwrite(path, im, quality=jpg_quality)
-        else:
-            imageio.imwrite(path, im)
-    save_im('cropped_folder/image_cropped.jpeg', source_image)
+    #1024x2014
+    imageio.mimsave(opt.result_video, [super_resolution(img_as_ubyte(frame), 4) for frame in predictions], fps=fps)
+    
+    #256x256
+    # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
 
