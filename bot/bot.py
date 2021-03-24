@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import sys
 import time
 import typing as tp
 
@@ -9,11 +10,17 @@ from aiogram import Bot, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import Dispatcher
 from aiogram.types import ReplyKeyboardRemove
-from aiogram.utils import executor
+from aiogram.utils import executor, exceptions
 from aiogram.utils.emoji import emojize
 from aiogram.utils.helper import Helper, HelperMode, ListItem
+import imageio
+from skimage import img_as_ubyte
 
 from config import *
+
+sys.path.append("../first-order-model")
+from demo import make_animation, make_photo_animation, read_video, load_checkpoints, super_resolution
+from crop import crop_image, crop_video
 
 # Bot initialization
 TOKEN = os.environ.get('TOKEN', None)
@@ -21,11 +28,11 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
 
 # Logging
-logging.basicConfig(filename='log.txt',
-                    filemode='a',
-                    format='%(asctime)s, %(msecs) d %(name)s %(levelname) s %(message) s',
-                    datefmt='%H:%M:%S',
-                    level=logging.INFO)
+# logging.basicConfig(filename='log.txt',
+#                     filemode='a',
+#                     format='%(asctime)s, %(msecs) d %(name)s %(levelname) s %(message) s',
+#                     datefmt='%H:%M:%S',
+#                     level=logging.INFO)
 logging.info("Model was init")
 
 # Limit parallel processes
@@ -42,9 +49,75 @@ class TestStates(Helper):
     TEST_STATE_1 = ListItem()
 
 
+RELATIVE = True
+ADAPT_SCALE = True
+CPU = False
+CONFIG = '../first-order-model/config/vox-256.yaml'
+CHECKPOINT = '../first-order-model/pretrained_models/vox-cpk.pth.tar'
+PATH = 'img/'
+
+
+def prepare_data(user_id: int):
+    data = dict()
+    source = user_videos[user_id]['source']
+    target = user_videos[user_id]['target']
+
+    if source.endswith('.jpg'):
+        crop_image(source)
+    else:
+        crop_video(source)
+    try:
+        source_reader = imageio.get_reader('crop_' + source)
+    except FileNotFoundError:
+        source_reader = imageio.get_reader(source)
+
+    if source.endswith('.jpg'):
+        data['source_media'] = next(iter(source_reader))
+        data['photo'] = True
+    else:
+        data['source_media'] = read_video(source_reader)
+        data['photo'] = False
+
+    crop_video(target)
+    try:
+        target_reader = imageio.get_reader('crop_' + target)
+    except FileNotFoundError:
+        target_reader = imageio.get_reader(target)
+    fps = target_reader.get_meta_data()['fps']
+
+    data['fps'] = fps
+    data['target_media'] = read_video(target_reader)
+
+    generator, kp_detector = load_checkpoints(config_path=CONFIG,
+                                              checkpoint_path=CHECKPOINT,
+                                              cpu=CPU)
+    data['generator'] = generator
+    data['kp_detector'] = kp_detector
+    return data
+
+
 def first_order(user_id: int):
-    time.sleep(60)
-    return user_id
+    data = prepare_data(user_id)
+    if data['photo']:
+        predictions = make_photo_animation(
+                data['source_media'], data['target_media'],
+                data['generator'], data['kp_detector'],
+                relative=RELATIVE,
+                adapt_movement_scale=ADAPT_SCALE,
+                cpu=CPU
+        )
+    else:
+        predictions = make_animation(
+                data['source_media'], data['target_media'],
+                data['generator'], data['kp_detector'],
+                relative=RELATIVE,
+                adapt_movement_scale=ADAPT_SCALE,
+                cpu=CPU
+        )
+    # imageio.mimsave(f'{PATH}1.mp4', [img_as_ubyte(frame) for frame in predictions], "mp4", fps=data['fps'])
+    imageio.mimsave(f'{PATH}{user_id}.mp4',
+                    [super_resolution(img_as_ubyte(frame), 4) for frame in predictions],
+                    "mp4", fps=data['fps'])
 
 
 def safe_first_order(user_id: int):
@@ -52,10 +125,9 @@ def safe_first_order(user_id: int):
     Safe run of first_order - Semaphore limits max processes in parallel
     """
     start = time.time()
-    res = first_order(user_id)
+    first_order(user_id)
     end = time.time()
     logging.info(f"Video processing took {end - start}")
-    return res
 
 
 async def change_state(user_id: int, new_state: tp.Optional[int]):
@@ -73,29 +145,44 @@ async def ask_for_source(message: types.Message):
                          reply_markup=ReplyKeyboardRemove())
 
 
-async def save_video(message: types.Message, key: str):
+async def save_media(message: types.Message, key: str):
+    photo = False
+    ext = '.mp4'
     if message.content_type == 'video':
-        video = message.video
+        media = message.video
+    elif message.content_type == 'video_note':
+        media = message.video_note
     else:
-        video = message.video_note
+        media = message.photo[-1]
+        photo = True
+        ext = '.jpg'
 
-    logging.info(f"Took video. Duration: {video.duration} sec")
-    if video.duration > 60:
-        await message.answer("Видео слишком длинное. "
-                             "Поддерживаются видео продолжительностью не более 1 минуты")
-        logging.info("Took too long video")
+    if photo:
+        logging.info(f"Took photo")
+    else:
+        logging.info(f"Took video. Duration: {media.duration} sec")
+        if media.duration > 60:
+            await message.answer("Видео слишком длинное. "
+                                 "Поддерживаются видео продолжительностью не более 1 минуты")
+            logging.info("Took too long video")
+            return False
+
+    try:
+        filename = f"{PATH}{key}{message.from_user.id}{ext}"
+        await media.download(filename)
+    except exceptions.FileIsTooBig:
+        await message.answer("Телеграм не поддерживает файлы свыше 20 Мб, "
+                             "попробуйте отправить ваше видео со сжатием")
         return False
 
-    meta = await video.get_file()
-    resp = await bot.download_file(meta['file_path'])
-    target = resp.read()
-
-    await video.download("1.mp4")
     if message.from_user.id not in user_videos:
         user_videos[message.from_user.id] = EMPTY_DICT
 
-    user_videos[message.from_user.id][key] = target
-    await message.answer("Видео успешно загружено")
+    user_videos[message.from_user.id][key] = filename
+    if photo:
+        await message.answer("Фото успешно загружено")
+    else:
+        await message.answer("Видео успешно загружено")
     return True
 
 
@@ -109,10 +196,11 @@ async def process_video(message: types.Message):
     loop = asyncio.get_running_loop()
     with concurrent.futures.ThreadPoolExecutor() as pool:
         async with sem:
-            result = await loop.run_in_executor(
+            await loop.run_in_executor(
                 pool, safe_first_order, message.from_user.id)
-
-    await message.answer(f"Отправляю обработанное видео {result}")
+    await message.answer_video(open(f'{PATH}{message.from_user.id}.mp4', 'rb'))
+    os.system(f"rm img/target{message.from_user.id}* crop_img/*{message.from_user.id}*")
+    # await message.answer(f"Отправляю обработанное видео")
 
 
 @dp.message_handler(commands=['start'])
@@ -133,7 +221,7 @@ async def send_help(message: types.Message) -> None:
 
 @dp.message_handler(content_types=['video', 'video_note'])
 async def handle_target_video(message: types.Message):
-    if not await save_video(message, 'target'):
+    if not await save_media(message, 'target'):
         return
 
     if user_videos[message.from_user.id]['source'] is None:
@@ -163,7 +251,15 @@ async def choose_source_video(message: types.Message):
 
 @dp.message_handler(state=TestStates.TEST_STATE_1, content_types=['video', 'video_note'])
 async def handle_source_video(message: types.Message):
-    if not await save_video(message, 'source'):
+    if not await save_media(message, 'source'):
+        return
+
+    await process_video(message)
+
+
+@dp.message_handler(state=TestStates.TEST_STATE_1, content_types=['photo'])
+async def handle_source_photo(message: types.Message):
+    if not await save_media(message, 'source'):
         return
 
     await process_video(message)

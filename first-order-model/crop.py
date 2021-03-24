@@ -20,7 +20,7 @@ def extract_bbox(frame, fa):
     else:
         scale_factor = 1
     frame = frame[..., :3]
-    bboxes = fa.face_detector.detect_from_image(frame[..., ::-1])
+    bboxes = fa.face_detector.detect_from_image(frame[..., ::-1].copy())
     if len(bboxes) == 0:
         return []
     return np.array(bboxes)[:, :-1] * scale_factor
@@ -69,7 +69,7 @@ def compute_bbox(start, end, fps, tube_bbox, frame_shape, inp, image_shape, incr
 
     scale = f'{image_shape[0]}:{image_shape[1]}'
     name = inp.split('.')[-2]
-    return f'ffmpeg -i {inp} -ss {start} -t {time} -filter:v "crop={w}:{h}:{left}:{top}, scale={scale}" f{name}.mp4 -y'
+    return f'ffmpeg -i {inp} -ss {start} -t {time} -filter:v "crop={w}:{h}:{left}:{top}, scale={scale}" crop_{name}.mp4 -y'
 
 
 def compute_bbox_trajectories(trajectories, fps, frame_shape, args):
@@ -154,7 +154,7 @@ def process_image(args):
     return crop_img
 
 
-def crop_video(inp, cpu=True, image_shape=(256, 256), increase=0.1, iou_with_initial=0.25, min_frames=150):
+def crop_video(inp, cpu=False, image_shape=(256, 256), increase=0.1, iou_with_initial=0.25, min_frames=150):
     args = {
         'inp': inp,
         'cpu': cpu,
@@ -169,7 +169,7 @@ def crop_video(inp, cpu=True, image_shape=(256, 256), increase=0.1, iou_with_ini
         os.system(command)
 
 
-def crop_image(inp, cpu=True, image_shape=(256, 256), increase=0.15, iou_with_initial=0.25, min_frames=1):
+def crop_image(inp, cpu=False, image_shape=(256, 256), increase=0.15, iou_with_initial=0.25, min_frames=1):
     args = {
         'inp': inp,
         'cpu': cpu,

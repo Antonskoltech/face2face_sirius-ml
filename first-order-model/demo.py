@@ -155,13 +155,12 @@ def find_best_frame(source, driving, cpu=False):
 
 def super_resolution(source_image, modelScale):
     sr = cv2.dnn_superres.DnnSuperResImpl_create()
-    sr.readModel('pretrained_models/ESPCN_x4.pb')
+    sr.readModel('../first-order-model/pretrained_models/ESPCN_x4.pb')
     sr.setModel('espcn', modelScale)
     upscaled = sr.upsample(source_image)
     return upscaled
 
-def read_video(path):
-    reader = imageio.get_reader(path)
+def read_video(reader):
     video = []
     try:
         for im in reader:
@@ -208,7 +207,7 @@ if __name__ == "__main__":
 
     opt = parser.parse_args()
 
-    opt.cpu = True
+    # opt.cpu = True
 
     if opt.from_image:
         crop.crop_image(opt.source_image)
@@ -216,17 +215,25 @@ if __name__ == "__main__":
         crop.crop_video(opt.source_image)
 
     crop.crop_video(opt.driving_video)
-    reader = imageio.get_reader(opt.driving_video)
-    fps = reader.get_meta_data()['fps']
+    # reader = imageio.get_reader(opt.driving_video)
+    # fps = reader.get_meta_data()['fps']
+    source_reader = imageio.get_reader(opt.source_image)
+    source_video = read_video(source_reader)
 
-    source_video = read_video(opt.source_image)
-    driving_video = read_video(opt.driving_video)
+    target_reader = imageio.get_reader(opt.driving_video)
+    fps = target_reader.get_meta_data()['fps']
+    driving_video = read_video(target_reader)
 
     generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
-    predictions = make_animation(source_video, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
+
+    predictions = make_animation(source_video, driving_video, generator, kp_detector,
+                                 relative=opt.relative,
+                                 adapt_movement_scale=opt.adapt_scale,
+                                 cpu=opt.cpu)
 
     #1024x2014
-    # imageio.mimsave(opt.result_video, [super_resolution(img_as_ubyte(frame), 4) for frame in predictions], fps=fps)
+    imageio.mimsave(opt.result_video, [super_resolution(img_as_ubyte(frame), 4) for frame in predictions], fps=fps)
     
     #256x256
-    imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
+    # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
+
