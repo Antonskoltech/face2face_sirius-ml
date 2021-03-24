@@ -1,6 +1,4 @@
 import matplotlib
-
-matplotlib.use('Agg')
 import os, sys
 import yaml
 from argparse import ArgumentParser
@@ -18,6 +16,7 @@ from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
 from scipy.spatial import ConvexHull
+matplotlib.use('Agg')
 
 
 if sys.version_info[0] < 3:
