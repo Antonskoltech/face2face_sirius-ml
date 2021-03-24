@@ -103,6 +103,7 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
             predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
     return predictions
 
+
 def make_photo_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False):
     with torch.no_grad():
         predictions = []
@@ -125,6 +126,7 @@ def make_photo_animation(source_image, driving_video, generator, kp_detector, re
 
             predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
     return predictions
+
 
 def find_best_frame(source, driving, cpu=False):
     import face_alignment
@@ -198,15 +200,21 @@ if __name__ == "__main__":
                         help="Set frame to start from.")
 
     parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
+    parser.add_argument("--from_image", dest="from_image", action="store_true")
 
     parser.set_defaults(relative=False)
     parser.set_defaults(adapt_scale=False)
+    parser.set_defaults(from_image=False)
 
     opt = parser.parse_args()
 
     opt.cpu = True
 
-    crop.crop_image(opt.source_image)
+    if opt.from_image:
+        crop.crop_image(opt.source_image)
+    else:
+        crop.crop_video(opt.source_image)
+
     crop.crop_video(opt.driving_video)
     reader = imageio.get_reader(opt.driving_video)
     fps = reader.get_meta_data()['fps']
