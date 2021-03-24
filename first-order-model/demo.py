@@ -104,6 +104,30 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
     return predictions
 
 
+def make_photo_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False):
+    with torch.no_grad():
+        predictions = []
+        source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
+        if not cpu:
+            source = source.cuda()
+        driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
+        kp_source = kp_detector(source)
+        kp_driving_initial = kp_detector(driving[:, :, 0])
+
+        for frame_idx in tqdm(range(driving.shape[2])):
+            driving_frame = driving[:, :, frame_idx]
+            if not cpu:
+                driving_frame = driving_frame.cuda()
+            kp_driving = kp_detector(driving_frame)
+            kp_norm = normalize_kp(kp_source=kp_source, kp_driving=kp_driving,
+                                   kp_driving_initial=kp_driving_initial, use_relative_movement=relative,
+                                   use_relative_jacobian=relative, adapt_movement_scale=adapt_movement_scale)
+            out = generator(source, kp_source=kp_source, kp_driving=kp_norm)
+
+            predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
+    return predictions
+
+
 def find_best_frame(source, driving, cpu=False):
     import face_alignment
 
@@ -190,6 +214,7 @@ if __name__ == "__main__":
         crop.crop_image(opt.source_image)
     else:
         crop.crop_video(opt.source_image)
+
     crop.crop_video(opt.driving_video)
     reader = imageio.get_reader(opt.driving_video)
     fps = reader.get_meta_data()['fps']
@@ -205,4 +230,3 @@ if __name__ == "__main__":
     
     #256x256
     imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
-    cv2.waitKey(0)
