@@ -165,28 +165,21 @@ if __name__ == "__main__":
                         help="Set frame to start from.")
  
     parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
- 
 
     parser.set_defaults(relative=False)
     parser.set_defaults(adapt_scale=False)
 
     opt = parser.parse_args()
 
+    reader = imageio.get_reader(opt.driving_video)
+    fps = reader.get_meta_data()['fps']
+
     source_video = read_video(opt.source_image)
     driving_video = read_video(opt.driving_video)
 
     generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
 
-    if opt.find_best_frame or opt.best_frame is not None:
-        i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
-        print ("Best frame: " + str(i))
-        driving_forward = driving_video[i:]
-        driving_backward = driving_video[:(i+1)][::-1]
-        predictions_forward = make_animation(source_video, driving_forward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
-        predictions_backward = make_animation(source_video, driving_backward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
-        predictions = predictions_backward[::-1] + predictions_forward[1:]
-    else:
-        predictions = make_animation(source_video, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
+    predictions = make_animation(source_video, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
 
     #1024x2014
     imageio.mimsave(opt.result_video, [super_resolution(img_as_ubyte(frame), 4) for frame in predictions], fps=fps)
