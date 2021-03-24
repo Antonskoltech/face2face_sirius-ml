@@ -43,10 +43,7 @@ class TestStates(Helper):
 
 
 def first_order(user_id: int):
-    start = time.time()
     time.sleep(60)
-    end = time.time()
-    logging.info(f"Video processing took {end - start}")
     return user_id
 
 
@@ -54,7 +51,10 @@ def safe_first_order(user_id: int):
     """
     Safe run of first_order - Semaphore limits max processes in parallel
     """
+    start = time.time()
     res = first_order(user_id)
+    end = time.time()
+    logging.info(f"Video processing took {end - start}")
     return res
 
 
@@ -79,9 +79,11 @@ async def save_video(message: types.Message, key: str):
     else:
         video = message.video_note
 
+    logging.info(f"Took video. Duration: {video.duration} sec")
     if video.duration > 60:
         await message.answer("Видео слишком длинное. "
                              "Поддерживаются видео продолжительностью не более 1 минуты")
+        logging.info("Took too long video")
         return False
 
     meta = await video.get_file()
