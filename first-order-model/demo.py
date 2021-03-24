@@ -18,6 +18,7 @@ from modules.generator import OcclusionAwareGenerator
 from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
 from scipy.spatial import ConvexHull
+import cv2
 
 
 if sys.version_info[0] < 3:
@@ -60,7 +61,6 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
                    cpu=False):
     with torch.no_grad():
         predictions = []
-        source_images = [source_images]
         source = [torch.tensor(s[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2) for s in source_images]
         driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
         if not cpu:
@@ -129,6 +129,31 @@ def find_best_frame(source, driving, cpu=False):
             frame_num = i
     return frame_num
 
+def super_resolution(source_image, modelScale):
+    sr = cv2.dnn_superres.DnnSuperResImpl_create()
+    sr.readModel('pretrained_models/ESPCN_x4.pb')
+    sr.setModel('espcn', modelScale)
+    upscaled = sr.upsample(source_image)
+    return upscaled
+
+def read_video(path):
+    reader = imageio.get_reader(path)
+    video = []
+    try:
+        for im in reader:
+            video.append(im)
+    except RuntimeError:
+        pass
+    reader.close()
+
+    from multiprocessing.pool import ThreadPool
+    pool = ThreadPool(12)
+
+    def mapping_resize(frame):
+        return resize(frame, (256, 256))[..., :3]
+
+    video = list(pool.map(mapping_resize, video))
+    return video
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -161,45 +186,17 @@ if __name__ == "__main__":
 
     crop.crop_image(opt.source_image)
     crop.crop_video(opt.driving_video)
-    source_image = imageio.imread(opt.source_image)
     reader = imageio.get_reader(opt.driving_video)
     fps = reader.get_meta_data()['fps']
-    driving_video = []
-    try:
-        for i, im in enumerate(reader):
-            # TODO: delete it
-            driving_video.append(im)
-            if i > 200:
-                break
-    except RuntimeError:
-        pass
-    reader.close()
 
-    source_image = resize(source_image, (256, 256))[..., :3]
-    driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
+    source_video = read_video(opt.source_image)
+    driving_video = read_video(opt.driving_video)
+
     generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
+    predictions = make_animation(source_video, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
 
-    if opt.find_best_frame or opt.best_frame is not None:
-        i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
-        print("Best frame: " + str(i))
-        driving_forward = driving_video[i:]
-        driving_backward = driving_video[:(i + 1)][::-1]
-        predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector,
-                                             relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
-        predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector,
-                                              relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
-        predictions = predictions_backward[::-1] + predictions_forward[1:]
-    else:
-        predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative,
-                                     adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
+    #1024x2014
+    # imageio.mimsave(opt.result_video, [super_resolution(img_as_ubyte(frame), 4) for frame in predictions], fps=fps)
+    
+    #256x256
     imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
-
-
-    def save_im(path, im, jpg_quality=95):
-        ext = os.path.splitext(path)[1][1:]
-        if ext.lower() in ['jpg', 'jpeg']:
-            imageio.imwrite(path, im, quality=jpg_quality)
-        else:
-            imageio.imwrite(path, im)
-
-    save_im('cropped_folder/image_cropped.jpeg', source_image)
