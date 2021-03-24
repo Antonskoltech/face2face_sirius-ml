@@ -1,19 +1,20 @@
+import os
+import warnings
+
+import cv2
 import face_alignment
-import skimage.io
-import numpy
-from argparse import ArgumentParser
+import imageio
+import numpy as np
 from skimage import img_as_ubyte
 from skimage.transform import resize
 from tqdm import tqdm
-import os
-import imageio
-import numpy as np
-import warnings
+
 warnings.filterwarnings("ignore")
+
 
 def extract_bbox(frame, fa):
     if max(frame.shape[0], frame.shape[1]) > 640:
-        scale_factor =  max(frame.shape[0], frame.shape[1]) / 640.0
+        scale_factor = max(frame.shape[0], frame.shape[1]) / 640.0
         frame = resize(frame, (int(frame.shape[0] / scale_factor), int(frame.shape[1] / scale_factor)))
         frame = img_as_ubyte(frame)
     else:
@@ -23,7 +24,6 @@ def extract_bbox(frame, fa):
     if len(bboxes) == 0:
         return []
     return np.array(bboxes)[:, :-1] * scale_factor
-
 
 
 def bb_intersection_over_union(boxA, boxB):
@@ -51,7 +51,7 @@ def compute_bbox(start, end, fps, tube_bbox, frame_shape, inp, image_shape, incr
     width = right - left
     height = bot - top
 
-    #Computing aspect preserving bbox
+    # Computing aspect preserving bbox
     width_increase = max(increase_area, ((1 + 2 * increase_area) * height - width) / (2 * width))
     height_increase = max(increase_area, ((1 + 2 * increase_area) * width - height) / (2 * height))
 
@@ -68,32 +68,32 @@ def compute_bbox(start, end, fps, tube_bbox, frame_shape, inp, image_shape, incr
     time = end - start
 
     scale = f'{image_shape[0]}:{image_shape[1]}'
-
-    return f'ffmpeg -i {inp} -ss {start} -t {time} -filter:v "crop={w}:{h}:{left}:{top}, scale={scale}" crop.mp4'
+    name = inp.split('.')[-1]
+    return f'ffmpeg -i {inp} -ss {start} -t {time} -filter:v "crop={w}:{h}:{left}:{top}, scale={scale}" f{name}.mp4 -y'
 
 
 def compute_bbox_trajectories(trajectories, fps, frame_shape, args):
     commands = []
     for i, (bbox, tube_bbox, start, end) in enumerate(trajectories):
-        if (end - start) > args.min_frames:
-            command = compute_bbox(start, end, fps, tube_bbox, frame_shape, inp=args.inp, image_shape=args.image_shape, increase_area=args.increase)
+        if (end - start) > args['min_frames']:
+            command = compute_bbox(start, end, fps, tube_bbox, frame_shape, inp=args['inp'],
+                                   image_shape=args['image_shape'], increase_area=args['increase'])
             commands.append(command)
     return commands
 
 
 def process_video(args):
-    device = 'cpu' if args.cpu else 'cuda'
+    device = 'cpu' if args['cpu'] else 'cuda'
     fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False, device=device)
-    video = imageio.get_reader(args.inp)
+    video = imageio.get_reader(args['inp'])
 
     trajectories = []
-    previous_frame = None
     fps = video.get_meta_data()['fps']
     commands = []
     try:
         for i, frame in tqdm(enumerate(video)):
             frame_shape = frame.shape
-            bboxes =  extract_bbox(frame, fa)
+            bboxes = extract_bbox(frame, fa)
             ## For each trajectory check the criterion
             not_valid_trajectories = []
             valid_trajectories = []
@@ -103,7 +103,7 @@ def process_video(args):
                 intersection = 0
                 for bbox in bboxes:
                     intersection = max(intersection, bb_intersection_over_union(tube_bbox, bbox))
-                if intersection > args.iou_with_initial:
+                if intersection > args['iou_with_initial']:
                     valid_trajectories.append(trajectory)
                 else:
                     not_valid_trajectories.append(trajectory)
@@ -118,7 +118,7 @@ def process_video(args):
                 for trajectory in trajectories:
                     tube_bbox = trajectory[0]
                     current_intersection = bb_intersection_over_union(tube_bbox, bbox)
-                    if intersection < current_intersection and current_intersection > args.iou_with_initial:
+                    if intersection < current_intersection and current_intersection > args['iou_with_initial']:
                         intersection = bb_intersection_over_union(tube_bbox, bbox)
                         current_trajectory = trajectory
 
@@ -129,7 +129,6 @@ def process_video(args):
                     current_trajectory[3] = i
                     current_trajectory[1] = join(current_trajectory[1], bbox)
 
-
     except IndexError as e:
         raise (e)
 
@@ -137,22 +136,47 @@ def process_video(args):
     return commands
 
 
-if __name__ == "__main__":
-    parser = ArgumentParser()
+def process_image(args):
+    device = 'cpu' if args['cpu'] else 'cuda'
+    fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False, device=device)
+    frame = next(iter(imageio.get_reader(args['inp'])))
+    bboxes = extract_bbox(frame, fa)
+    left, top, right, bot = bboxes[0]
+    top = top - (bot - top) * args['increase']
+    left = left - (right - left) * args['increase']
+    bot = bot + (bot - top) * args['increase']
+    right = right + (right - left) * args['increase']
+    left, top, right, bot = int(left), int(top), int(right), int(bot)
 
-    parser.add_argument("--image_shape", default=(256, 256), type=lambda x: tuple(map(int, x.split(','))),
-                        help="Image shape")
-    parser.add_argument("--increase", default=0.1, type=float, help='Increase bbox by this amount')
-    parser.add_argument("--iou_with_initial", type=float, default=0.25, help="The minimal allowed iou with inital bbox")
-    parser.add_argument("--inp", required=True, help='Input image or video')
-    parser.add_argument("--min_frames", type=int, default=150,  help='Minimum number of frames')
-    parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
+    crop_img = frame[top:bot, left:right]
+    crop_img = cv2.cvtColor(np.array(crop_img), cv2.COLOR_RGB2BGR)
+    cv2.imwrite(args['inp'], crop_img)
+    return crop_img
 
 
-    args = parser.parse_args()
+def crop_video(inp, cpu=True, image_shape=(256, 256), increase=0.1, iou_with_initial=0.25, min_frames=150):
+    args = {
+        'inp': inp,
+        'cpu': cpu,
+        'image_shape': image_shape,
+        'increase': increase,
+        'iou_with_initial': iou_with_initial,
+        'min_frames': min_frames
+    }
 
     commands = process_video(args)
     for command in commands:
-        print (command)
+        os.system(command)
 
-        
+
+def crop_image(inp, cpu=True, image_shape=(256, 256), increase=0.15, iou_with_initial=0.25, min_frames=1):
+    args = {
+        'inp': inp,
+        'cpu': cpu,
+        'image_shape': image_shape,
+        'increase': increase,
+        'iou_with_initial': iou_with_initial,
+        'min_frames': min_frames
+    }
+
+    process_image(args)

@@ -1,4 +1,5 @@
 import matplotlib
+
 matplotlib.use('Agg')
 import os, sys
 import yaml
@@ -7,6 +8,7 @@ from tqdm import tqdm
 
 import imageio
 import numpy as np
+import crop
 from skimage.transform import resize
 from skimage import img_as_ubyte
 import torch
@@ -17,14 +19,13 @@ from modules.keypoint_detector import KPDetector
 from animate import normalize_kp
 from scipy.spatial import ConvexHull
 import cv2
-import time
 
 
 if sys.version_info[0] < 3:
     raise Exception("You must use Python 3 or higher. Recommended version is Python 3.7")
 
-def load_checkpoints(config_path, checkpoint_path, cpu=False):
 
+def load_checkpoints(config_path, checkpoint_path, cpu=False):
     with open(config_path) as f:
         config = yaml.load(f)
 
@@ -37,26 +38,27 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
                              **config['model_params']['common_params'])
     if not cpu:
         kp_detector.cuda()
-    
+
     if cpu:
         checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
     else:
         checkpoint = torch.load(checkpoint_path)
- 
+
     generator.load_state_dict(checkpoint['generator'])
     kp_detector.load_state_dict(checkpoint['kp_detector'])
-    
+
     if not cpu:
         generator = DataParallelWithCallback(generator)
         kp_detector = DataParallelWithCallback(kp_detector)
 
     generator.eval()
     kp_detector.eval()
-    sr = cv2.dnn_superres.DnnSuperResImpl_create()
+
     return generator, kp_detector
 
 
-def make_animation(source_images, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False):
+def make_animation(source_images, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True,
+                   cpu=False):
     with torch.no_grad():
         predictions = []
         source = [torch.tensor(s[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2) for s in source_images]
@@ -68,11 +70,11 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
         kp_driving_initial = kp_detector(driving[:, :, 0])
 
         distance = lambda y: lambda x: np.sum(np.sum((x - y) ** 2, axis=1) ** 0.5)
-        
+
         kp_frame_value = kp_driving_initial['value'][0].detach().cpu().numpy()
         i_prev = np.argmin(list(map(distance(kp_frame_value), kp_source_value)))
         kp_source_prev, source_prev = kp_source[i_prev], source[i_prev]
-        
+
         alpha = 0.1
 
         for frame_idx in tqdm(range(driving.shape[2])):
@@ -81,7 +83,7 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
                 driving_frame = driving_frame.cuda()
             kp_driving = kp_detector(driving_frame)
             kp_frame_value = kp_driving['value'][0].detach().cpu().numpy()
-            
+
             i = np.argmin(list(map(distance(kp_frame_value), kp_source_value)))
             if i != i_prev:
                 kp_source_prev['value'] = (kp_source_prev['value'] + kp_source[i]['value']) / 2
@@ -90,9 +92,9 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
                 i_prev = i
             else:
                 kp_source_prev['value'] = alpha * kp_source_prev['value'] + (1 - alpha) * kp_source[i]['value']
-                kp_source_prev['jacobian'] =  alpha * kp_source_prev['jacobian'] + (1 - alpha) * kp_source[i]['jacobian']
-                source_prev =  alpha * source_prev + (1 - alpha) * source[i]
-            
+                kp_source_prev['jacobian'] = alpha * kp_source_prev['jacobian'] + (1 - alpha) * kp_source[i]['jacobian']
+                source_prev = alpha * source_prev + (1 - alpha) * source[i]
+
             kp_norm = normalize_kp(kp_source=kp_source_prev, kp_driving=kp_driving,
                                    kp_driving_initial=kp_driving_initial, use_relative_movement=relative,
                                    use_relative_jacobian=relative, adapt_movement_scale=adapt_movement_scale)
@@ -100,6 +102,7 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
 
             predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
     return predictions
+
 
 def find_best_frame(source, driving, cpu=False):
     import face_alignment
@@ -115,7 +118,7 @@ def find_best_frame(source, driving, cpu=False):
                                       device='cpu' if cpu else 'cuda')
     kp_source = fa.get_landmarks(255 * source)[0]
     kp_source = normalize_kp(kp_source)
-    norm  = float('inf')
+    norm = float('inf')
     frame_num = 0
     for i, image in tqdm(enumerate(driving)):
         kp_driving = fa.get_landmarks(255 * image)[0]
@@ -135,7 +138,6 @@ def super_resolution(source_image, modelScale):
 
 def read_video(path):
     reader = imageio.get_reader(path)
-    fps = reader.get_meta_data()['fps']
     video = []
     try:
         for im in reader:
@@ -161,16 +163,18 @@ if __name__ == "__main__":
     parser.add_argument("--source_image", default='sup-mat/source.png', help="path to source image")
     parser.add_argument("--driving_video", default='sup-mat/source.png', help="path to driving video")
     parser.add_argument("--result_video", default='result.mp4', help="path to output")
- 
-    parser.add_argument("--relative", dest="relative", action="store_true", help="use relative or absolute keypoint coordinates")
-    parser.add_argument("--adapt_scale", dest="adapt_scale", action="store_true", help="adapt movement scale based on convex hull of keypoints")
 
-    parser.add_argument("--find_best_frame", dest="find_best_frame", action="store_true", 
+    parser.add_argument("--relative", dest="relative", action="store_true",
+                        help="use relative or absolute keypoint coordinates")
+    parser.add_argument("--adapt_scale", dest="adapt_scale", action="store_true",
+                        help="adapt movement scale based on convex hull of keypoints")
+
+    parser.add_argument("--find_best_frame", dest="find_best_frame", action="store_true",
                         help="Generate from the frame that is the most alligned with source. (Only for faces, requires face_aligment lib)")
 
-    parser.add_argument("--best_frame", dest="best_frame", type=int, default=None,  
+    parser.add_argument("--best_frame", dest="best_frame", type=int, default=None,
                         help="Set frame to start from.")
- 
+
     parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
 
     parser.set_defaults(relative=False)
@@ -178,6 +182,10 @@ if __name__ == "__main__":
 
     opt = parser.parse_args()
 
+    opt.cpu = True
+
+    crop.crop_image(opt.source_image)
+    crop.crop_video(opt.driving_video)
     reader = imageio.get_reader(opt.driving_video)
     fps = reader.get_meta_data()['fps']
 
@@ -185,7 +193,6 @@ if __name__ == "__main__":
     driving_video = read_video(opt.driving_video)
 
     generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
-
     predictions = make_animation(source_video, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
 
     #1024x2014
@@ -193,4 +200,3 @@ if __name__ == "__main__":
     
     #256x256
     imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
-
