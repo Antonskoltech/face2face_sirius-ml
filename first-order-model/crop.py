@@ -68,7 +68,7 @@ def compute_bbox(start, end, fps, tube_bbox, frame_shape, inp, image_shape, incr
     time = end - start
 
     scale = f'{image_shape[0]}:{image_shape[1]}'
-    name = inp.split('.')[-1]
+    name = inp.split('.')[-2]
     return f'ffmpeg -i {inp} -ss {start} -t {time} -filter:v "crop={w}:{h}:{left}:{top}, scale={scale}" f{name}.mp4 -y'
 
 

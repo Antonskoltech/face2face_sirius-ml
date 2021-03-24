@@ -176,15 +176,20 @@ if __name__ == "__main__":
                         help="Set frame to start from.")
 
     parser.add_argument("--cpu", dest="cpu", action="store_true", help="cpu mode.")
+    parser.add_argument("--from_image", dest="from_image", action="store_true")
 
     parser.set_defaults(relative=False)
     parser.set_defaults(adapt_scale=False)
+    parser.set_defaults(from_image=False)
 
     opt = parser.parse_args()
 
     opt.cpu = True
 
-    crop.crop_image(opt.source_image)
+    if opt.from_image:
+        crop.crop_image(opt.source_image)
+    else:
+        crop.crop_video(opt.source_image)
     crop.crop_video(opt.driving_video)
     reader = imageio.get_reader(opt.driving_video)
     fps = reader.get_meta_data()['fps']
@@ -200,3 +205,4 @@ if __name__ == "__main__":
     
     #256x256
     imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
+    cv2.waitKey(0)
