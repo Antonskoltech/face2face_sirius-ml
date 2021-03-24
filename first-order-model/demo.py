@@ -128,7 +128,7 @@ def find_best_frame(source, driving, cpu=False):
 
 def super_resolution(source_image, modelScale):
     sr = cv2.dnn_superres.DnnSuperResImpl_create()
-    sr.readModel('ESPCN_x4.pb')
+    sr.readModel('pretrained_models/ESPCN_x4.pb')
     sr.setModel('espcn', modelScale)
     upscaled = sr.upsample(source_image)
     return upscaled
@@ -143,7 +143,14 @@ def read_video(path):
     except RuntimeError:
         pass
     reader.close()
-    video = [resize(frame, (256, 256))[..., :3] for frame in video]
+
+    from multiprocessing.pool import ThreadPool
+    pool = ThreadPool(12)
+
+    def mapping_resize(frame):
+        return resize(frame, (256, 256))[..., :3]
+
+    video = list(pool.map(mapping_resize, video))
     return video
 
 if __name__ == "__main__":
@@ -182,8 +189,8 @@ if __name__ == "__main__":
     predictions = make_animation(source_video, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
 
     #1024x2014
-    imageio.mimsave(opt.result_video, [super_resolution(img_as_ubyte(frame), 4) for frame in predictions], fps=fps)
+    # imageio.mimsave(opt.result_video, [super_resolution(img_as_ubyte(frame), 4) for frame in predictions], fps=fps)
     
     #256x256
-    # imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
+    imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
 
