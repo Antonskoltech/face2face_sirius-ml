@@ -15,6 +15,7 @@ from aiogram.utils.emoji import emojize
 from aiogram.utils.helper import Helper, HelperMode, ListItem
 import imageio
 from skimage import img_as_ubyte
+from skimage.transform import resize
 
 from config import *
 
@@ -72,7 +73,7 @@ def prepare_data(user_id: int):
         source_reader = imageio.get_reader(source)
 
     if source.endswith('.jpg'):
-        data['source_media'] = next(iter(source_reader))
+        data['source_media'] = resize(next(iter(source_reader)), (256, 256))[..., :3]
         data['photo'] = True
     else:
         data['source_media'] = read_video(source_reader)
