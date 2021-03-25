@@ -75,7 +75,9 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
         i_prev = np.argmin(list(map(distance(kp_frame_value), kp_source_value)))
         kp_source_prev, source_prev = kp_source[i_prev], source[i_prev]
 
-        alpha = 0.1
+        diff = 20
+        alpha = 0
+        n = len(source_images)
 
         for frame_idx in tqdm(range(driving.shape[2])):
             driving_frame = driving[:, :, frame_idx]
@@ -84,7 +86,9 @@ def make_animation(source_images, driving_video, generator, kp_detector, relativ
             kp_driving = kp_detector(driving_frame)
             kp_frame_value = kp_driving['value'][0].detach().cpu().numpy()
 
-            i = np.argmin(list(map(distance(kp_frame_value), kp_source_value)))
+            i = np.argmin(list(map(distance(kp_frame_value), kp_source_value[max(0, i_prev - diff):min(n, i_prev + diff)])))
+            i += max(0, i_prev - diff)
+
             if i != i_prev:
                 kp_source_prev['value'] = (kp_source_prev['value'] + kp_source[i]['value']) / 2
                 kp_source_prev['jacobian'] = (kp_source_prev['jacobian'] + kp_source[i]['jacobian']) / 2
