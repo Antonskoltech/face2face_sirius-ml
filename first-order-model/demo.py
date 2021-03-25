@@ -209,27 +209,37 @@ if __name__ == "__main__":
 
     # opt.cpu = True
 
-    if opt.from_image:
-        crop.crop_image(opt.source_image)
-    else:
-        crop.crop_video(opt.source_image)
+    # if opt.from_image:
+    #     crop.crop_image(opt.source_image)
+    # else:
+    #     crop.crop_video(opt.source_image)
 
-    crop.crop_video(opt.driving_video)
+    # crop.crop_video(opt.driving_video)
     # reader = imageio.get_reader(opt.driving_video)
     # fps = reader.get_meta_data()['fps']
     source_reader = imageio.get_reader(opt.source_image)
-    source_video = read_video(source_reader)
+    # source_video = read_video(source_reader)\
+    if opt.from_image:
+        source_photo = resize(next(iter(source_reader)), (256, 256))[..., :3]
+    else:
+        source_video = read_video(source_reader)
 
     target_reader = imageio.get_reader(opt.driving_video)
     fps = target_reader.get_meta_data()['fps']
     driving_video = read_video(target_reader)
 
     generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
-
-    predictions = make_animation(source_video, driving_video, generator, kp_detector,
+    if opt.from_image:
+        predictions = make_photo_animation(source_photo, driving_video, generator, kp_detector,
                                  relative=opt.relative,
                                  adapt_movement_scale=opt.adapt_scale,
                                  cpu=opt.cpu)
+    else:
+        predictions = make_animation(source_video, driving_video, generator, kp_detector,
+                                 relative=opt.relative,
+                                 adapt_movement_scale=opt.adapt_scale,
+                                 cpu=opt.cpu)
+    
 
     #1024x2014
     imageio.mimsave(opt.result_video, [super_resolution(img_as_ubyte(frame), 4) for frame in predictions], fps=fps)
