@@ -68,8 +68,8 @@ def compute_bbox(start, end, fps, tube_bbox, frame_shape, inp, image_shape, incr
     time = end - start
 
     scale = f'{image_shape[0]}:{image_shape[1]}'
-    name = inp.split('.')[-2]
-    return f'ffmpeg -i {inp} -ss {start} -t {time} -filter:v "crop={w}:{h}:{left}:{top}, scale={scale}" crop_{name}.mp4 -y'
+    name = inp
+    return f'ffmpeg -i {inp} -ss {start} -t {time} -filter:v "crop={w}:{h}:{left}:{top}, scale={scale}" crop_{name} -y'
 
 
 def compute_bbox_trajectories(trajectories, fps, frame_shape, args):
@@ -129,8 +129,8 @@ def process_video(args):
                     current_trajectory[3] = i
                     current_trajectory[1] = join(current_trajectory[1], bbox)
 
-    except IndexError as e:
-        raise (e)
+    except Exception as e:
+        print (e)
 
     commands += compute_bbox_trajectories(trajectories, fps, frame_shape, args)
     return commands
@@ -154,7 +154,7 @@ def process_image(args):
     return crop_img
 
 
-def crop_video(inp, cpu=False, image_shape=(256, 256), increase=0.1, iou_with_initial=0.25, min_frames=150):
+def crop_video(inp, cpu=False, image_shape=(256, 256), increase=0.2, iou_with_initial=0.25, min_frames=150):
     args = {
         'inp': inp,
         'cpu': cpu,
@@ -169,7 +169,7 @@ def crop_video(inp, cpu=False, image_shape=(256, 256), increase=0.1, iou_with_in
         os.system(command)
 
 
-def crop_image(inp, cpu=False, image_shape=(256, 256), increase=0.15, iou_with_initial=0.25, min_frames=1):
+def crop_image(inp, cpu=False, image_shape=(256, 256), increase=0.25, iou_with_initial=0.25, min_frames=1):
     args = {
         'inp': inp,
         'cpu': cpu,

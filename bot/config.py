@@ -3,7 +3,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 EMPTY_DICT = {'source': None, 'target': None}
 CONTINUE = 'Продолжить'
-CHANGE_VIDEO = 'Поменять видео'
+CHANGE_VIDEO = 'Поменять фото/видео'
 
 buttons_source = [KeyboardButton(CONTINUE),
                   KeyboardButton(CHANGE_VIDEO)]

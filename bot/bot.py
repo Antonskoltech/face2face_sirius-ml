@@ -34,10 +34,11 @@ dp = Dispatcher(bot, storage=MemoryStorage())
 #                     format='%(asctime)s, %(msecs) d %(name)s %(levelname) s %(message) s',
 #                     datefmt='%H:%M:%S',
 #                     level=logging.INFO)
+
 logging.info("Model was init")
 
 # Limit parallel processes
-sem = asyncio.Semaphore(2)
+sem = asyncio.Semaphore(5)
 
 # Global video storage
 user_videos = dict()
@@ -70,6 +71,7 @@ def prepare_data(user_id: int):
     try:
         source_reader = imageio.get_reader('crop_' + source)
     except FileNotFoundError:
+        print("Didn't find cropped video")
         source_reader = imageio.get_reader(source)
 
     if source.endswith('.jpg'):
@@ -83,6 +85,7 @@ def prepare_data(user_id: int):
     try:
         target_reader = imageio.get_reader('crop_' + target)
     except FileNotFoundError:
+        print("Didn't find cropped video")
         target_reader = imageio.get_reader(target)
     fps = target_reader.get_meta_data()['fps']
 
@@ -126,9 +129,15 @@ def safe_first_order(user_id: int):
     Safe run of first_order - Semaphore limits max processes in parallel
     """
     start = time.time()
-    first_order(user_id)
+    try:
+        first_order(user_id)
+    except Exception as e:
+        print(e)
+        logging.warning(e)
+        return False
     end = time.time()
     logging.info(f"Video processing took {end - start}")
+    return True
 
 
 async def change_state(user_id: int, new_state: tp.Optional[int]):
@@ -153,6 +162,8 @@ async def save_media(message: types.Message, key: str):
         media = message.video
     elif message.content_type == 'video_note':
         media = message.video_note
+    elif message.content_type == 'animation':
+        media = message.animation
     else:
         media = message.photo[-1]
         photo = True
@@ -197,9 +208,14 @@ async def process_video(message: types.Message):
     loop = asyncio.get_running_loop()
     with concurrent.futures.ThreadPoolExecutor() as pool:
         async with sem:
-            await loop.run_in_executor(
+            res = await loop.run_in_executor(
                 pool, safe_first_order, message.from_user.id)
-    await message.answer_video(open(f'{PATH}{message.from_user.id}.mp4', 'rb'))
+    if not res:
+        await message.answer("В процессе обработки возникла ошибка.\n"
+                             "Скорее всего, на одном из видео/фото алгоритм не смог распознать лица.\n"
+                             "Попробуй начать сначала и отправить видео, из которого нужно перенести мимику")
+    else:
+        await message.answer_video(open(f'{PATH}{message.from_user.id}.mp4', 'rb'))
     os.system(f"rm img/target{message.from_user.id}* crop_img/*{message.from_user.id}*")
     # await message.answer(f"Отправляю обработанное видео")
 
@@ -220,7 +236,7 @@ async def send_help(message: types.Message) -> None:
                          "бот предоставит тебе такую возможность после выбора таргетного видео.")
 
 
-@dp.message_handler(content_types=['video', 'video_note'])
+@dp.message_handler(content_types=['video', 'video_note', 'animation'])
 async def handle_target_video(message: types.Message):
     if not await save_media(message, 'target'):
         return
@@ -230,13 +246,14 @@ async def handle_target_video(message: types.Message):
     else:
         await change_state(message.from_user.id, 0)
         await message.answer("Я могу начать обработку видео. "
-                             "Поменять фото/видео которое будем переносить на таргет, или продолжим?",
+                             "Поменять фото/видео человека на которого будем переносить мимику из таргета, "
+                             "или продолжим?",
                              reply_markup=markup_source)
 
 
 @dp.message_handler()
 async def handle_text(message: types.Message):
-    await message.answer("Жду видео:)")
+    await message.answer("Жду видео, из которого нужно перенести мимику:)")
 
 
 @dp.message_handler(state=TestStates.TEST_STATE_0)
@@ -250,16 +267,8 @@ async def choose_source_video(message: types.Message):
                              reply_markup=markup_source)
 
 
-@dp.message_handler(state=TestStates.TEST_STATE_1, content_types=['video', 'video_note'])
+@dp.message_handler(state=TestStates.TEST_STATE_1, content_types=['photo', 'video', 'video_note'])
 async def handle_source_video(message: types.Message):
-    if not await save_media(message, 'source'):
-        return
-
-    await process_video(message)
-
-
-@dp.message_handler(state=TestStates.TEST_STATE_1, content_types=['photo'])
-async def handle_source_photo(message: types.Message):
     if not await save_media(message, 'source'):
         return
 
