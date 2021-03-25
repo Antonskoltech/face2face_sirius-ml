@@ -14,6 +14,7 @@ from aiogram.utils import executor, exceptions
 from aiogram.utils.emoji import emojize
 from aiogram.utils.helper import Helper, HelperMode, ListItem
 import imageio
+from moviepy.editor import *
 from skimage import img_as_ubyte
 from skimage.transform import resize
 
@@ -64,9 +65,13 @@ def prepare_data(user_id: int):
     source = user_videos[user_id]['source']
     target = user_videos[user_id]['target']
 
+    audio_clip = AudioFileClip(target)
+    data['audio'] = audio_clip
+
     if source.endswith('.jpg'):
         crop_image(source)
     else:
+        # pass
         crop_video(source)
     try:
         source_reader = imageio.get_reader('crop_' + source)
@@ -119,9 +124,18 @@ def first_order(user_id: int):
                 cpu=CPU
         )
     # imageio.mimsave(f'{PATH}1.mp4', [img_as_ubyte(frame) for frame in predictions], "mp4", fps=data['fps'])
-    imageio.mimsave(f'{PATH}{user_id}.mp4',
+    filename = f'{PATH}{user_id}'
+    imageio.mimsave(filename + '.mp4',
                     [super_resolution(img_as_ubyte(frame), 4) for frame in predictions],
                     "mp4", fps=data['fps'])
+    video_clip = VideoFileClip(filename + '.mp4')
+    video_clip.audio = data['audio']
+    try:
+        video_clip.write_videofile(filename + '_a' + '.mp4')
+    except Exception as e:
+        print(e)
+        video_clip = VideoFileClip(filename + '.mp4')
+        video_clip.write_videofile(filename + '_a' + '.mp4')
 
 
 def safe_first_order(user_id: int):
@@ -215,13 +229,15 @@ async def process_video(message: types.Message):
                              "Скорее всего, на одном из видео/фото алгоритм не смог распознать лица.\n"
                              "Попробуй начать сначала и отправить видео, из которого нужно перенести мимику")
     else:
-        await message.answer_video(open(f'{PATH}{message.from_user.id}.mp4', 'rb'))
+        # await message.answer_video(open(f'{PATH}{message.from_user.id}.mp4', 'rb'))
+        await message.answer_video(open(f'{PATH}{message.from_user.id}_a.mp4', 'rb'))
     os.system(f"rm img/target{message.from_user.id}* crop_img/*{message.from_user.id}*")
     # await message.answer(f"Отправляю обработанное видео")
 
 
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message) -> None:
+    user_videos[message.from_user.id] = EMPTY_DICT
     await message.answer("Привет, {}!\n".format(message.from_user.first_name) +
                          "Я бот, который поможет тебе предстать в совершенно новом облике\n"
                          "Отправь видео, в котором ты хочешь оказаться")
@@ -241,14 +257,14 @@ async def handle_target_video(message: types.Message):
     if not await save_media(message, 'target'):
         return
 
-    if user_videos[message.from_user.id]['source'] is None:
-        await ask_for_source(message)
-    else:
-        await change_state(message.from_user.id, 0)
-        await message.answer("Я могу начать обработку видео. "
-                             "Поменять фото/видео человека на которого будем переносить мимику из таргета, "
-                             "или продолжим?",
-                             reply_markup=markup_source)
+    # if user_videos[message.from_user.id]['source'] is None:
+    await ask_for_source(message)
+    # else:
+    #     await change_state(message.from_user.id, 0)
+    #     await message.answer("Я могу начать обработку видео. "
+    #                          "Поменять фото/видео человека на которого будем переносить мимику из таргета, "
+    #                          "или продолжим?",
+    #                          reply_markup=markup_source)
 
 
 @dp.message_handler()

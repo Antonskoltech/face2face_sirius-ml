@@ -85,52 +85,70 @@ def compute_bbox_trajectories(trajectories, fps, frame_shape, args):
 def process_video(args):
     device = 'cpu' if args['cpu'] else 'cuda'
     fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=False, device=device)
-    video = imageio.get_reader(args['inp'])
+    reader = imageio.get_reader(args['inp'])
+    shape = reader.get_meta_data()['size']
+
+    if shape[0] == shape[1]:
+        return ''
+
+    fps = reader.get_meta_data()['fps']
+
+    frames = []
+    try:
+        for im in reader:
+            frames.append(im)
+    except RuntimeError as e:
+        print("\n\n\n")
+        print(len(frames))
+        print(e)
+    reader.close()
 
     trajectories = []
-    fps = video.get_meta_data()['fps']
     commands = []
-    try:
-        for i, frame in tqdm(enumerate(video)):
-            frame_shape = frame.shape
-            bboxes = extract_bbox(frame, fa)
-            ## For each trajectory check the criterion
-            not_valid_trajectories = []
-            valid_trajectories = []
 
+    # j = None
+    frame_shape = frames[0].shape
+    for i, frame in enumerate(frames):
+        # try:
+        #     frame = next(video_iterator)
+        #     j = frame
+        # except Exception as e:
+        #     frame = j
+        bboxes = extract_bbox(frame, fa)
+        ## For each trajectory check the criterion
+        not_valid_trajectories = []
+        valid_trajectories = []
+
+        for trajectory in trajectories:
+            tube_bbox = trajectory[0]
+            intersection = 0
+            for bbox in bboxes:
+                intersection = max(intersection, bb_intersection_over_union(tube_bbox, bbox))
+            if intersection > args['iou_with_initial']:
+                valid_trajectories.append(trajectory)
+            else:
+                not_valid_trajectories.append(trajectory)
+
+        commands += compute_bbox_trajectories(not_valid_trajectories, fps, frame_shape, args)
+        trajectories = valid_trajectories
+
+        ## Assign bbox to trajectories, create new trajectories
+        for bbox in bboxes:
+            intersection = 0
+            current_trajectory = None
             for trajectory in trajectories:
                 tube_bbox = trajectory[0]
-                intersection = 0
-                for bbox in bboxes:
-                    intersection = max(intersection, bb_intersection_over_union(tube_bbox, bbox))
-                if intersection > args['iou_with_initial']:
-                    valid_trajectories.append(trajectory)
-                else:
-                    not_valid_trajectories.append(trajectory)
+                current_intersection = bb_intersection_over_union(tube_bbox, bbox)
+                if intersection < current_intersection and current_intersection > args['iou_with_initial']:
+                    intersection = bb_intersection_over_union(tube_bbox, bbox)
+                    current_trajectory = trajectory
 
-            commands += compute_bbox_trajectories(not_valid_trajectories, fps, frame_shape, args)
-            trajectories = valid_trajectories
-
-            ## Assign bbox to trajectories, create new trajectories
-            for bbox in bboxes:
-                intersection = 0
-                current_trajectory = None
-                for trajectory in trajectories:
-                    tube_bbox = trajectory[0]
-                    current_intersection = bb_intersection_over_union(tube_bbox, bbox)
-                    if intersection < current_intersection and current_intersection > args['iou_with_initial']:
-                        intersection = bb_intersection_over_union(tube_bbox, bbox)
-                        current_trajectory = trajectory
-
-                ## Create new trajectory
-                if current_trajectory is None:
-                    trajectories.append([bbox, bbox, i, i])
-                else:
-                    current_trajectory[3] = i
-                    current_trajectory[1] = join(current_trajectory[1], bbox)
-
-    except Exception as e:
-        print (e)
+            ## Create new trajectory
+            if current_trajectory is None:
+                trajectories.append([bbox, bbox, i, i])
+            else:
+                current_trajectory[3] = i
+                current_trajectory[1] = join(current_trajectory[1], bbox)
 
     commands += compute_bbox_trajectories(trajectories, fps, frame_shape, args)
     return commands
